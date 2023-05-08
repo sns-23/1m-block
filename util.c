@@ -10,7 +10,7 @@ void report(char indicator, int level, const char *fmt, ...)
     va_list a;
 
     if (level > LOG_LEVEL)
-    return;
+        return;
 
     va_start(a, fmt);
     fprintf(stream, "[%c] %s", indicator, (level == ERROR_LEVEL) ? "ERROR: " : "");
