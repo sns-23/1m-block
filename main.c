@@ -18,8 +18,8 @@ size_t host_cnt;
 
 static void usage(void)
 {
-    printf("syntax : netfilter-test <host>\n");
-    printf("sample : netfilter-test test.gilgil.net");
+    printf("syntax : 1m-block <site list file>\n");
+    printf("sample : 1m-block top-1m.csv");
 }
 
 static int load_hosts(const char *filename)
