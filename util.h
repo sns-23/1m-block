@@ -18,10 +18,13 @@
 #define LOG_LEVEL INFO_LEVEL
 #endif
 
+#define HEXDUMP_COLS 16
+
 #define pr_err(fmt, args...) report('!', ERROR_LEVEL, fmt, ## args)
 #define pr_info(fmt, args...) report('+', INFO_LEVEL, fmt, ## args)
 #define pr_debug(fmt, args...) report('?', DEBUG_LEVEL, fmt, ## args)
 
 void report(char indicator, int level, const char *fmt, ...);
+void hexdump(void *mem, unsigned int len);
 
 #endif /* __UTIL_H__ */

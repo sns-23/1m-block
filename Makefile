@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -g -Wall
-LDFLAGS = -lnetfilter_queue -I/usr/include/glib-2.0 -I/usr/lib/x86_64-linux-gnu/glib-2.0/include -lglib-2.0
+LDFLAGS = -lnetfilter_queue
 OBJS = main.o util.o
 TARGET = 1m-block
 

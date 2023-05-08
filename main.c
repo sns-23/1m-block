@@ -9,18 +9,111 @@
 #include <errno.h>
 
 #include <libnetfilter_queue/libnetfilter_queue.h>
-#include <glib.h>
 
 #include "libnet-headers.h"
 #include "util.h"
 
-GArray *host_arr;
+char **host_arr;
+size_t host_cnt;
 
 static void usage(void)
 {
     printf("syntax : netfilter-test <host>\n");
     printf("sample : netfilter-test test.gilgil.net");
 }
+
+static int load_hosts(const char *filename)
+{
+    FILE *fp;
+    size_t _;
+    char *buf = NULL;
+    char *host;
+    size_t n = 0x100;
+
+    fp = fopen(filename, "r");
+    if (!fp) {
+        pr_err("Cannot open file: %s\n", filename);
+        goto out_error;
+    }
+
+    host_arr = calloc(n, sizeof(char *));
+
+    while (getline(&buf, &_, fp) > 0) {
+        if (buf == NULL) {
+            pr_err("Cannot read hosts from file\n");
+            goto out_error;
+        }
+        
+        if (host_cnt >= n) {
+            n *= 2;
+            host_arr = realloc(host_arr, n * sizeof(char *));
+        }
+        
+        host = strdup(buf + strcspn(buf, ",") + 1);
+        host[strcspn(host, "\n")] = '\x00';
+        host_arr[host_cnt++] = host;
+    }
+
+    fclose(fp);
+    free(buf);
+
+    return 0;
+
+out_error:
+    if (fp)
+        fclose(fp);
+    if (host_arr)
+        free(host_arr);
+    if (buf)
+        free(buf);
+
+    return -1;
+}
+
+static int compare(const void *a, const void *b)
+{
+    /*
+    * Sorting strings lexicographically using strcmp
+    * https://elixir.bootlin.com/glibc/glibc-2.35/source/string/strcmp.c#L30
+    */
+    return strcmp(*(char **)a, *(char **)b);
+}
+
+static void sort_hosts()
+{
+    qsort(host_arr, host_cnt, sizeof(char *), compare);
+}
+
+static bool search_host(char *host)
+{
+    size_t mid;
+    size_t left = 0;
+    size_t right = host_cnt - 1;
+
+    while (left <= right) {
+        mid = left + (right - left) / 2;
+        
+        if (strcmp(host_arr[mid], host) == 0)
+            return true;
+        
+        if (strcmp(host_arr[mid], host) < 0)
+            left = mid + 1;
+        else
+            right = mid - 1;
+    }
+
+    return false;
+}
+
+static void unload_hosts()
+{
+    for (int i = 0; i < host_cnt; i++)
+        free(host_arr[i]);
+
+    free(host_arr);
+    host_arr = NULL;
+}
+
 
 static uint32_t get_pkt_id(struct nfq_data *nfa)
 {
@@ -39,33 +132,24 @@ static bool check_http(char *http_data)
     * HTTP header starts with method name or "HTTP" 
     * https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods 
     */
-    if (strcmp(http_data, "HTTP"))
-        return true;
-
-    if (strcmp(http_data, "CONNECT"))
-        return true;
-
-    if (strcmp(http_data, "DELETE"))
-        return true;
-
-    if (strcmp(http_data, "GET"))
-        return true;
-
-    if (strcmp(http_data, "HEAD"))
-        return true;
-
-    if (strcmp(http_data, "OPTIONS"))
-        return true;
-
-    if (strcmp(http_data, "POST"))
-        return true;
-
-    if (strcmp(http_data, "PUT"))
-        return true;
+    const char *methods[] = {
+        "HTTP",
+        "CONNECT",
+        "DELETE",
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST",
+        "PUT",
+        "TRACE",
+        NULL
+    };
     
-    if (strcmp(http_data, "TRACE"))
-        return true;
-    
+    for (int i = 0; methods[i] != NULL; i++) {
+        if (!strncmp(methods[i], http_data, strlen(methods[i])))
+            return true;
+    }
+        
     return false;
 }
 
@@ -111,17 +195,19 @@ static int check_host(struct nfq_data* nfa)
     */
     if (http_data_len < 16)
         return NF_ACCEPT;
-
+    
     if (!check_http(http_hdr))
         return NF_ACCEPT;
-    
+
     host = strstr(http_hdr, "Host: ");
     if (host == NULL)
         return NF_ACCEPT;
 
-    if (g_array_binary_search(host_arr, host, g_strcmp0, NULL) == false)
+    host = host + sizeof("Host: ") -1;
+    host[strcspn(host, "\r\n")] = '\x00';
+    if (search_host(host) == false)
         return NF_ACCEPT;
-
+    
     return NF_DROP;
 }
 
@@ -143,63 +229,6 @@ static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     return nfq_set_verdict(qh, id, verdict, 0, NULL);
 }
 
-int g_arr_init(void)
-{
-    host_arr = g_array_new(false, false, sizeof(char *));
-    if (!host_arr)
-        return -1;
-    return 0;
-}
-
-void g_arr_destroy(void)
-{
-    if (host_arr) {
-        g_array_free(host_arr, true);
-        host_arr = NULL;
-    }
-}
-
-int load_hosts(const char *filename)
-{
-    FILE *fp;
-    size_t n;
-    char *buf = NULL;
-    char *host;
-
-    fp = fopen(filename, "r");
-    if (!fp) {
-        pr_err("Cannot open file: %s\n", filename);
-        goto out_error;
-    }
-
-    if (g_arr_init() < 0) {
-        pr_err("Cannot create hash table\n");
-        goto out_error;
-    }
-
-    while (getline(&buf, &n, fp) > 0) {
-        if (buf == NULL) {
-            pr_err("Cannot read hosts from file\n");
-            goto out_error;
-        }
-        
-        host = strdup(buf + strcspn(buf, ",") + 1);
-        g_array_append_vals(host_arr, &host, 1);
-    }
-
-    fclose(fp);
-    free(buf);
-
-    return 0;
-
-out_error:
-    if (fp)
-        fclose(fp);
-    if (buf)
-        free(buf);
-    g_arr_destroy();
-    return -1;
-}
 
 int main(int argc, char **argv)
 {
@@ -216,6 +245,8 @@ int main(int argc, char **argv)
 
     if (load_hosts(argv[1]) < 0)
         return 1;
+
+    sort_hosts();
 
     printf("opening library handle\n");
     h = nfq_open();
@@ -285,7 +316,7 @@ int main(int argc, char **argv)
     printf("closing library handle\n");
     nfq_close(h);
 
-    g_arr_destroy();
+    unload_hosts();
 
     exit(0);
 }
